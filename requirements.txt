@@ -1,0 +1,15 @@
+pandas
+numpy
+scikit-learn
+statsmodels
+ta
+ccxt
+yfinance
+lightgbm
+xgboost
+optuna
+torch
+shap
+matplotlib
+seaborn
+requests
