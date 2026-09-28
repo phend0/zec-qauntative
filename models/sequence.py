@@ -1,15 +1,17 @@
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+import logging
+import os
+import random
+
 import numpy as np
 import pandas as pd
-import logging
-import random
+import torch
 from sklearn.preprocessing import RobustScaler
-import os
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
+
+from config import config
 
 from .base import BaseModel
-from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +56,9 @@ class RNNModel(nn.Module):
         
     def forward(self, x):
         if self.rnn_type == 'LSTM':
-            out, (hn, cn) = self.rnn(x)
+            out, (_hn, _cn) = self.rnn(x)
         else:
-            out, hn = self.rnn(x)
+            out, _hn = self.rnn(x)
         
         # Extract features from the final sequence step
         out = out[:, -1, :]

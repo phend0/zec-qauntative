@@ -1,12 +1,11 @@
-import pandas as pd
-import numpy as np
-import requests
-import time
-import ccxt
-import yfinance as yf
 import logging
-from typing import Optional
-from datetime import datetime
+import time
+
+import ccxt
+import pandas as pd
+import requests
+import yfinance as yf
+
 from config import config
 
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +16,7 @@ class DataLoader:
         self.cmc_api_key = config.api.coinmarketcap_api_key
         self.interval = config.dates.interval
         
-    def _fetch_cmc_historical(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+    def _fetch_cmc_historical(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame | None:
         if not self.cmc_api_key:
             logger.warning("No CMC API key provided.")
             return None
@@ -47,7 +46,7 @@ class DataLoader:
             response.raise_for_status()
             data = response.json()
             
-            quotes = data.get("data", {}).get(quotes, [])
+            quotes = data.get("data", {}).get("quotes", [])
             if not quotes:
                 return None
                 
@@ -67,11 +66,11 @@ class DataLoader:
             df.set_index("timestamp", inplace=True)
             df.index = df.index.tz_convert(None) # Make tz-naive for uniform alignment
             return df
-        except Exception as e:
+        except (requests.RequestException, KeyError, TypeError, ValueError) as e:
             logger.error(f"CMC API error for {symbol}: {e}")
             return None
 
-    def _fetch_ccxt_historical(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+    def _fetch_ccxt_historical(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame | None:
         exchange = ccxt.binance()
         ccxt_interval_map = {"1h": "1h", "1d": "1d"}
         ccxt_interval = ccxt_interval_map.get(self.interval, "1h")
@@ -104,11 +103,11 @@ class DataLoader:
             # Clip to end_date just in case we overshot
             df = df.loc[df.index <= pd.to_datetime(end_date)]
             return df
-        except Exception as e:
+        except (ccxt.BaseError, ValueError, TypeError) as e:
             logger.error(f"CCXT error for {symbol}: {e}")
             return None
             
-    def _fetch_yfinance_historical(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+    def _fetch_yfinance_historical(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame | None:
         yf_symbol = f"{symbol}-USD"
         # Map our interval to yfinance's expected format (e.g., '1h', '1d')
         yf_interval = self.interval
@@ -127,7 +126,7 @@ class DataLoader:
                 
             df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
             return df[["open", "high", "low", "close", "volume"]]
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
             logger.error(f"YFinance error for {symbol}: {e}")
             return None
 
@@ -163,7 +162,6 @@ class DataLoader:
             df = self.fetch_data(asset, start_date, end_date)
             dfs[asset] = df
             
-        target = config.features.target_asset
         freq = "h" if self.interval == "1h" else "d"
         
         # Align edges (intersection of all indices)

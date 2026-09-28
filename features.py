@@ -1,9 +1,10 @@
-import pandas as pd
+import logging
+
 import numpy as np
+import pandas as pd
 import ta
 from statsmodels.tsa.stattools import adfuller
-import logging
-from typing import List
+
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ class FeatureEngineer:
         return self.df
 
     @staticmethod
-    def check_stationarity(df: pd.DataFrame, significance_level: float = 0.05) -> List[str]:
+    def check_stationarity(df: pd.DataFrame, significance_level: float = 0.05) -> list[str]:
         """
         Runs the Augmented Dickey-Fuller (ADF) test on features.
         Returns a list of non-stationary features.
@@ -132,7 +133,7 @@ class FeatureEngineer:
                 
                 if p_value > significance_level:
                     non_stationary.append(col)
-            except Exception as e:
+            except (ValueError, np.linalg.LinAlgError) as e:
                 logger.warning(f"ADF test failed for {col}: {e}")
                 
         if non_stationary:

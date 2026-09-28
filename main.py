@@ -1,13 +1,13 @@
 import logging
+
 import pandas as pd
+
+from backtest import Backtester
 from data_loader import DataLoader
 from features import FeatureEngineer
+from models.tabular import LightGBMModel
 from target import TargetGenerator
 from validation import PurgedKFold
-from models.tabular import LogRegModel, LightGBMModel
-from models.sequence import PyTorchSequenceModel
-from backtest import Backtester
-from config import config
 
 # Set root level explicitly
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -52,7 +52,7 @@ def main():
     for fold, (train_idx, test_idx) in enumerate(pkf.split(X, y)):
         logger.info(f"--- Processing Fold {fold + 1} ---")
         X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
-        X_test, y_test = X.iloc[test_idx], y.iloc[test_idx]
+        X_test = X.iloc[test_idx]
         
         model.train(X_train, y_train)
         preds = model.predict(X_test)

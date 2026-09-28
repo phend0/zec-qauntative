@@ -1,16 +1,18 @@
-import numpy as np
-import pandas as pd
+import logging
+from typing import Any
+
 import lightgbm as lgb
+import numpy as np
+import optuna
+import pandas as pd
+import shap
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler
-import optuna
-import shap
-import logging
-from typing import Dict, Any
+
+from config import config
 
 from .base import BaseModel
-from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ class LightGBMModel(BaseModel):
         self.model = None
         self.best_params = None
         
-    def _optimize(self, X_train: pd.DataFrame, y_train: pd.Series) -> Dict[str, Any]:
+    def _optimize(self, X_train: pd.DataFrame, y_train: pd.Series) -> dict[str, Any]:
         optuna.logging.set_verbosity(optuna.logging.WARNING)
         
         # Simple temporal train/val split for Optuna inner loop

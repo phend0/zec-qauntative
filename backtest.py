@@ -1,7 +1,9 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 import logging
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
 from config import config
 
 logger = logging.getLogger(__name__)
