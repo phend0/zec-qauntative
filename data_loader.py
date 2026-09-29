@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import datetime, timedelta
 
 import ccxt
 import pandas as pd
@@ -71,47 +72,58 @@ class DataLoader:
             return None
 
     def _fetch_ccxt_historical(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame | None:
-        exchange = ccxt.binance()
         ccxt_interval_map = {"1h": "1h", "1d": "1d"}
         ccxt_interval = ccxt_interval_map.get(self.interval, "1h")
-        pair = f"{symbol}/USDT"
         
-        try:
-            since = exchange.parse8601(pd.to_datetime(start_date).isoformat() + "Z")
-            end_timestamp = exchange.parse8601(pd.to_datetime(end_date).isoformat() + "Z")
-            all_ohlcv = []
-            
-            while True:
-                ohlcv = exchange.fetch_ohlcv(pair, ccxt_interval, since=since, limit=1000)
-                if not ohlcv:
-                    break
+        # Try Binance first, then Kraken
+        exchanges = [
+            (ccxt.binance(), f"{symbol}/USDT"),
+            (ccxt.kraken(), f"{symbol}/USD")
+        ]
+        
+        for exchange, pair in exchanges:
+            try:
+                since = exchange.parse8601(pd.to_datetime(start_date).isoformat() + "Z")
+                end_timestamp = exchange.parse8601(pd.to_datetime(end_date).isoformat() + "Z")
+                all_ohlcv = []
+                
+                while True:
+                    ohlcv = exchange.fetch_ohlcv(pair, ccxt_interval, since=since, limit=1000)
+                    if not ohlcv:
+                        break
+                        
+                    all_ohlcv += ohlcv
+                    since = ohlcv[-1][0] + 1
                     
-                all_ohlcv += ohlcv
-                since = ohlcv[-1][0] + 1
-                
-                time.sleep(exchange.rateLimit / 1000) # Respect rate limits
-                
-                if len(ohlcv) < 1000 or since > end_timestamp:
-                    break
+                    time.sleep(exchange.rateLimit / 1000) # Respect rate limits
                     
-            if not all_ohlcv:
-                return None
+                    if len(ohlcv) < 1000 or since > end_timestamp:
+                        break
+                        
+                if all_ohlcv:
+                    df = pd.DataFrame(all_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
+                    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+                    df.set_index("timestamp", inplace=True)
+                    df = df.loc[df.index <= pd.to_datetime(end_date)]
+                    if not df.empty:
+                        return df
+            except (ccxt.BaseError, ValueError, TypeError) as e:
+                logger.warning(f"CCXT {exchange.id} error for {pair}: {e}")
+                continue
                 
-            df = pd.DataFrame(all_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-            df.set_index("timestamp", inplace=True)
-            # Clip to end_date just in case we overshot
-            df = df.loc[df.index <= pd.to_datetime(end_date)]
-            return df
-        except (ccxt.BaseError, ValueError, TypeError) as e:
-            logger.error(f"CCXT error for {symbol}: {e}")
-            return None
+        return None
             
     def _fetch_yfinance_historical(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame | None:
         yf_symbol = f"{symbol}-USD"
-        # Map our interval to yfinance's expected format (e.g., '1h', '1d')
         yf_interval = self.interval
         try:
+            # yfinance restricts 1h intraday data to the last 720 days
+            if yf_interval == "1h":
+                max_start = (datetime.utcnow() - timedelta(days=720)).strftime("%Y-%m-%d")
+                if pd.to_datetime(start_date) < pd.to_datetime(max_start):
+                    logger.info(f"yfinance 1h requests limited to 720 days. Adjusting start_date to {max_start}")
+                    start_date = max_start
+
             # yfinance progress=False to keep logs clean
             df = yf.download(yf_symbol, start=start_date, end=end_date, interval=yf_interval, progress=False)
             if df.empty:
@@ -120,7 +132,7 @@ class DataLoader:
             df.index = df.index.tz_localize(None)
             df.index.name = "timestamp"
             
-            # For multi-index columns returned by yfinance if multiple symbols (shouldn't happen here)
+            # For multi-index columns returned by yfinance if multiple symbols
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
                 
@@ -139,17 +151,22 @@ class DataLoader:
             logger.info(f"Loaded {symbol} from CMC.")
             return df
             
-        # Fallback 1: CCXT (Binance)
-        df = self._fetch_ccxt_historical(symbol, start_date, end_date)
-        if df is not None and not df.empty:
-            logger.info(f"Loaded {symbol} from CCXT (Binance).")
-            return df
+        # Fallback 1: CCXT (Binance / Kraken)
+        df_ccxt = self._fetch_ccxt_historical(symbol, start_date, end_date)
+        if df_ccxt is not None and len(df_ccxt) >= 2000:
+            logger.info(f"Loaded {symbol} from CCXT ({len(df_ccxt)} rows).")
+            return df_ccxt
             
-        # Fallback 2: yfinance
-        df = self._fetch_yfinance_historical(symbol, start_date, end_date)
-        if df is not None and not df.empty:
-            logger.info(f"Loaded {symbol} from yfinance.")
-            return df
+        # Fallback 2: yfinance (provides up to ~17,000 hourly candles)
+        df_yf = self._fetch_yfinance_historical(symbol, start_date, end_date)
+        if df_yf is not None and not df_yf.empty:
+            if df_ccxt is None or len(df_yf) >= len(df_ccxt):
+                logger.info(f"Loaded {symbol} from yfinance ({len(df_yf)} rows).")
+                return df_yf
+                
+        if df_ccxt is not None and not df_ccxt.empty:
+            logger.info(f"Loaded {symbol} from CCXT ({len(df_ccxt)} rows).")
+            return df_ccxt
             
         raise ValueError(f"Failed to fetch data for {symbol} across all providers.")
 
